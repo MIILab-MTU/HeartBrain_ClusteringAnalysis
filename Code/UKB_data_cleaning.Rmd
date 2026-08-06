@@ -1,0 +1,414 @@
+---
+title: "Clustering Data Cleaning"
+author: "Aili Toyli"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#dwfine working directory
+wd = ""
+knitr::opts_knit$set(root.dir = paste0(wd, "URIP 2025/Data"))
+library(tidyverse)
+```
+
+
+
+## Read in MRI data
+```{r}
+#read in CMR data
+heart <- read.csv(paste0(wd, "URIP 2024/UKB Cleaned Data/cardiac_i2.csv")) %>% na.omit()
+#read in MRI data
+brain <- read.csv(paste0(wd + "URIP 2024/UKB Cleaned Data/mri_data.csv")) %>% na.omit()
+```
+
+## Run PCA on heart MRI data
+```{r}
+#standardize CMR data and remove rows with missing values
+heart_std <- heart %>% 
+  select(-eid) %>% 
+  scale(.)
+
+#calculate heart principal components
+heart_pc <- princomp(heart_std)
+summary(heart_pc)
+
+#visualize scree plot
+plot(heart_pc)
+
+#top 3 PCs are of interest
+
+
+#see major contributors to PC1
+sort(heart_pc$loadings[,1], decreasing = TRUE)[1:20]
+#primarily reflects LV radial strain & ejection fraction, RV ejection fraction
+
+#major contributors to PC2
+sort(heart_pc$loadings[,2], decreasing = TRUE)[1:20]
+#primarily reflects LV circumferential and longitudinal strain
+
+#major contributors to PC 3
+sort(heart_pc$loadings[,3], decreasing = TRUE)[1:20]
+#primarily reflects aortic and ventricular volumes
+
+#save scores for first 3 PCs
+heart_reduced <- heart_pc$scores[,1:3]
+heart_reduced <- cbind(heart$eid, as.data.frame(heart_reduced))
+colnames(heart_reduced) <- c('eid', 'heartPC1', 'heartPC2', 'heartPC3')
+```
+
+## Run PCA on brain MRI data
+```{r}
+#standardize CMR data and remove rows with missing values
+brain_std <- brain %>% 
+  select(-eid) %>% 
+  scale(.)
+
+#calculate heart principal components
+brain_pc <- princomp(brain_std)
+summary(brain_pc)
+
+#visualize scree plot
+plot(brain_pc)
+
+#top 4 PCs are of interest
+
+
+#see major contributors to PC1
+sort(brain_pc$loadings[,1], decreasing = TRUE)[1:10]
+#reflects overall brain intensity in scan
+
+#major contributors to PC2
+sort(brain_pc$loadings[,2], decreasing = TRUE)[1:10]
+#primarily reflects fluid composition
+#ventricles, choroid plexus
+
+
+#major contributors to PC 3
+sort(brain_pc$loadings[,3], decreasing = TRUE)[1:10]
+#primarily related to subcortical structures
+#accumbens area, putamen, caudate, amygdala, hippocampus
+
+#major contributors to PC 4
+sort(brain_pc$loadings[,4], decreasing = TRUE)[1:10]
+#reflects defects in brain anatomy
+#holes in segmentation (reflect brain anatomy abnormalities), WM hypointensities
+
+
+#save scores for first 4 PCs
+brain_reduced <- brain_pc$scores[,1:4]
+brain_reduced <- cbind(brain$eid, as.data.frame(brain_reduced))
+colnames(brain_reduced) <- c('eid', 'brainPC1', 'brainPC2', 'brainPC3', 'brainPC4')
+
+```
+
+## Fix names for MRI data
+This does not need to be run again now that the names have been fixed on original data files
+```{r}
+## ------------------------------------------------------------
+## Add human‑readable field titles as column names
+## ------------------------------------------------------------
+add_field_titles <- function(
+  filename,
+  vars,                                        # character vector: names to relabel
+  field_path = paste0(wd, "URIP 2024/UKB Cleaned Data/field_titles.csv")
+) {
+  library(stringr)  # for str_extract
+  library(dplyr)    # for rename_with
+  
+  ## 1. Load data --------------------------------------------------------------
+  df     <- read.csv(filename, check.names = FALSE)          # keep original names
+  field  <- read.csv(field_path, stringsAsFactors = FALSE) %>%
+              mutate(field_id = as.character(field_id))      # make sure it's character
+  
+  ## 2. Build a name‑mapping function -----------------------------------------
+  vars_in_df <- intersect(vars, names(df))                   # ignore any vars not present
+  
+  # extract field‑ID from each column name and translate to title
+  map_to_title <- function(colnames_vec) {
+    sapply(colnames_vec, function(col) {
+      if (!col %in% vars_in_df) return(col)                  # leave untouched
+      
+      # pull the part between “p” and “_”; if no “_”, take everything after “p”
+      id <- str_extract(col, "(?<=p)([^_]+)")
+      
+      title <- field$title[match(id, field$field_id)]
+      
+      if (is.na(title) || title == "") col else title        # fallback to original if no match
+    }, USE.NAMES = FALSE)
+  }
+  
+  ## 3. Rename only the requested columns -------------------------------------
+  df <- df %>% rename_with(map_to_title, .cols = all_of(vars_in_df))
+  
+  ## 4. Save over the original file -------------------------------------------
+  write.csv(df, filename, row.names = FALSE)
+  
+  invisible(df)  # return the data frame for interactive use
+}
+
+
+add_field_titles(paste0(wd, "URIP 2024/UKB Cleaned Data/cardiac_i2.csv"), names(heart))
+add_field_titles(paste0(wd, "URIP 2024/UKB Cleaned Data/mri_data.csv"), names(brain))
+cognitive <- read.csv(paste0(wd, "URIP 2025/Data/cognitive.csv"))
+add_field_titles(paste0(wd, "URIP 2025/Data/cognitive.csv"), names(cognitive))
+```
+
+#Read in covariate data
+```{r}
+#load covariate data (this is pulled from 2 different source files)
+#read in data for the majority of covariates
+#this was originally extracted for odds ratio calculation
+or_data1 <- read.csv(paste0(wd, "URIP 2024/UKB Raw Data/or_data1.csv"))
+or_data1 <- or_data1 %>% select(-X)
+or_data2 <- read.csv(paste0(wd, "URIP 2024/UKB Raw Data/or_data2.csv"))
+or_data2 <- or_data2 %>% select(-X)
+or_data3 <- read.csv(paste0(wd, "URIP 2024/UKB Raw Data/or_data3.csv"))
+or_data3 <- or_data3 %>% select(-X)
+or_data4 <- read.csv(paste0(wd, "URIP 2024/UKB Raw Data/or_data4.csv"))
+or_data4 <- or_data4 %>% select(-X)
+or_data5 <- read.csv(paste0(wd, "URIP 2024/UKB Raw Data/or_data5.csv"))
+or_data5 <- or_data5 %>% select(-X)
+
+#join covariate dataframes
+covar <- rbind(or_data1, or_data2, or_data3, or_data4, or_data5)
+rm(list = c("or_data1", "or_data2", "or_data3", "or_data4", "or_data5"))
+
+#read in covariates from instance 2
+i2 <- read.csv("imaging_instance.csv") %>% 
+  select(-X)
+
+joined_covars <- i2 %>% 
+  left_join(covar)
+#rename and relabel variables for clarity
+#clean dataframe
+covar <- joined_covars %>% 
+  #label covariates for better readability
+  mutate(Age = p21003_i2,
+         Sex = factor(p31, labels = c('Female', 'Male')),
+         Education = p845_i0) %>% 
+  mutate(BMI = p21001_i2) %>% 
+  #Create readable smoking status levels
+  mutate(Smoking = factor(p20116_i2, labels = c('Prefer not to answer', 'Never', 'Previous', 'Current'))) %>% 
+  #Label all types of depression/bipolar as yes, no if otherwise
+  mutate(Depression.Bipolar = factor(p20126_i0, labels = c('No', rep('Yes', 5)))) %>%
+  #Extract parents's AD status
+  mutate(Father.Alzheimers = ifelse(grepl('10', joined_covars$p20107_i2), TRUE, FALSE)) %>% 
+  mutate(Mother.Alzheimers = ifelse(grepl('10', joined_covars$p20110_i2), TRUE, FALSE)) %>% 
+  #Replace non response encodings from physical activity data with NA
+  #This reflects the number of days of moderate physical activity each week
+  mutate(Physical.Activity = replace(p884_i2, p884_i2 %in% c(-1, -3), NA)) %>% 
+  #Label alcohol consumption levels
+  mutate(Alcohol = factor(p1558_i2, labels = c('Daily or almost daily', '3-4 times a week', '1-2 times a week', '1-3 times a month', 'Special occasions only', 'Never', 'Prefer not to answer'))) %>% 
+  #Label annual income levels
+  mutate(Income = factor(p738_i2, labels = c('<£18,000', '£18,000-£30,999', '£31,000-£51,999', '£52,000-£100,000', '>£100,000', "Do not know", "Prefer not to answer"))) %>% 
+  #Save diabetes status as factor
+  mutate(Diabetes = factor(ifelse(grepl('E11', joined_covars$p41270), "Yes", "No"))) %>% 
+  select(eid, Age, Sex, BMI, Smoking, Depression.Bipolar, Physical.Activity, Alcohol, Income, Education, Father.Alzheimers, Mother.Alzheimers, p21000_i0)
+#Adjust ethnicity encodings to be more generalized
+covar$Ethnicity <- as.character(covar$p21000_i0)
+covar$Ethnicity <- ifelse(startsWith(covar$Ethnicity, '1'), 'White',
+                                  ifelse(startsWith(covar$Ethnicity, '2'), 'Mixed',
+                                         ifelse(startsWith(covar$Ethnicity, '3'), 'Asian',
+                                                ifelse(startsWith(covar$Ethnicity, '4'), 'Black',
+                                                       ifelse(covar$Ethnicity=='5', 'Chinese',
+                                                              ifelse(covar$Ethnicity=='6', 'Other',
+                                                                     NA))))))
+#drop original ethnicity column
+covar <- covar %>% select(-p21000_i0)
+#categorize ethnic background as a factor variable
+covar$Ethnicity<- factor(covar$Ethnicity)
+
+#read in blood pressure information from other data file
+bp <- read.csv(paste0(wd, "URIP 2024/UKB Raw Data/covar_data.csv"))
+#only retain blood pressure information
+bp <- bp %>% select(eid, p4079_i2_a0, p4080_i2_a0, p30780_i0, p30760_i0) %>% 
+  rename(SBP = p4080_i2_a0) %>% 
+  rename(DBP = p4079_i2_a0) %>% 
+  rename(LDL = p30780_i0) %>% 
+  rename(HDL = p30760_i0)
+
+#join both covariate dataframes
+covar <- bp %>% left_join(covar)
+
+#snp data (I need to figure out how I can extract this, pretty sure I can do it with PLINK on RAP)
+
+#load AD/CVD diagnosis data
+diagnosis <- read.csv(paste0(wd, "URIP 2024/UKB Cleaned Data/or_clean.csv"))[,13:26]
+
+#load cognitive testing results
+cognitive <- read.csv(paste0(wd, "URIP 2025/Data/cognitive.csv"))[,1:6]
+
+#join all of them
+joined_data <- heart_reduced %>% 
+  left_join(brain_reduced) %>% 
+  left_join(covar) %>% 
+  left_join(diagnosis) %>% 
+  left_join(cognitive)
+```
+
+
+## Data cleaning
+```{r}
+#list values that must be recoded as NA
+na_levels <- c(NULL = "Do not know", NULL = "Prefer not to answer")
+
+joined_data_clean  <- joined_data %>% 
+  #replace NA depression variables with "No"
+  mutate(Depression.Bipolar = fct_na_value_to_level(Depression.Bipolar, level = "No")) %>%
+  #remove participants with greater than 10% missingness
+  filter( rowMeans(is.na(.)) <= 0.20) %>% 
+  #recode non-response values for factors as NA
+  mutate(across(
+    where(is.factor),
+    ~ fct_recode(., !!!na_levels)))
+
+#reclassify income to middle of each category
+#i believe this is the best way to numerically reflect the values
+income_map <- c("<£18,000" = 9000, "£18,000-£30,999" = 24500, "£31,000-£51,999" = 41500, "£52,000-£100,000" = 76000, ">£100,000" = 100000)
+joined_data_clean$Income <- income_map[joined_data_clean$Income]
+
+#reclassify alcohol consumption as approximate number of drinks per year
+alcohol_map = c('Daily or almost daily' = 365, '3-4 times a week' = 182, '1-2 times a week' = 78, '1-3 times a month' = 24, 'Special occasions only' = 12)
+joined_data_clean$Alcohol <- alcohol_map[joined_data_clean$Alcohol]
+
+#one-hot encode indicator variables
+library(fastDummies)
+joined_data_hot <- dummy_cols(joined_data_clean, 
+                              remove_most_frequent_dummy = TRUE, 
+                              ignore_na = TRUE) %>% 
+  #remove previous categorical variables
+  select(-Sex, -Smoking, -Depression.Bipolar, -Ethnicity, -eid)
+
+#normalize data
+joined_data_scaled <- scale(joined_data_hot)
+
+#save center and scaling factors
+mu <- attr(joined_data_scaled, "scaled:center")
+sigma <- attr(joined_data_scaled, "scaled:scale")
+
+#convert scaled data matrix to dataframe
+joined_data_scaled <- as.data.frame(joined_data_scaled)
+write.csv(joined_data_hot, "clean_no_imp.csv", row.names = FALSE)
+
+```
+##Impute missing data
+```{r}
+#run KNN on continuous variables
+library(VIM)
+imputed_data <- kNN(joined_data_scaled)
+```
+
+## Remove unnecessary columns and create cognitive PC
+```{r}
+
+
+#descale data
+imputed_descaled <- sweep(imputed_data, 2, sigma, "*")
+imputed_descaled <- sweep(imputed_descaled, 2, mu, "+")
+
+#remove imputation indicators
+imputed_clean <- imputed_descaled[1:46] %>% 
+  cbind(eid = joined_data_clean$eid, .)
+
+#extract cognitive test results
+cognitive_imp <- imputed_clean %>% 
+  select(Mean.time.to.correctly.identify.matches, Maximum.digits.remembered.correctly, 
+         Fluid.intelligence.score, Duration.to.complete.alphanumeric.path..trail..2., 
+         Number.of.puzzles.correctly.solved) %>% 
+  mutate(Mean.time.to.correctly.identify.matches = -Mean.time.to.correctly.identify.matches,
+         Duration.to.complete.alphanumeric.path..trail..2. = -Duration.to.complete.alphanumeric.path..trail..2.) %>% scale(.)
+
+#perform PCA
+cognitive_pc <- princomp(cognitive_imp)
+summary(cognitive_pc)
+plot(cognitive_pc)
+#will only retain the first principal component for initial analyses
+
+cognitive_pc$loadings
+imputed_clean$cognitivePC1 <- cognitive_pc$scores[,1]
+
+#add cognitive PC to dataframe, remove original cognitive variables
+imputed_clean <- imputed_clean %>% 
+  select(-c(Mean.time.to.correctly.identify.matches, Maximum.digits.remembered.correctly, 
+         Fluid.intelligence.score, Duration.to.complete.alphanumeric.path..trail..2., 
+         Number.of.puzzles.correctly.solved))
+
+#save results for clustering analysis
+write.csv(imputed_clean, "imputed_data.csv", row.names = FALSE)
+```
+
+## Prepare prescription information
+```{r}
+library(data.table)
+#read in file of prescription codes
+prescrip_codes <- fread(paste0(wd, "URIP 2025/Data/coding4.tsv"))
+
+#read in ukb prescription data
+prescrip_data <- read.csv(paste0(wd, "URIP 2025/Data/prescrip.csv"))
+
+#save list of codes of interest
+cvd_drugs <- list(
+  statins = c('simvastatin', 'rosuvastatin', 'atorvastatin', 'pravastatin', 'fluvastatin'),
+  diuretics = c("chlorothiazide", "chlorthalidone", "polythiazide", "indapamide", "metolazone", "bumetanide", "furosemide", "amiloride", "triamterene"), 
+  beta_blockers = c("acebutolol", "betaxolol", "bisoprolol", "metoprolol", "nadolol", 
+                   "propranolol", "timolol", "atenolol", "penbutolol", "pindolol", 
+                   "carvedilol", "labetalol"),
+  angiotensin_antagonists = c("candesartan", "eprosartan", "irbesartan", "losartan", "olmesartan", "telmisartan", "valsartan"),
+  calcium_channel_blockers = c("diltiazem", "verapamil", "amlodipine", "felodipine", "isradipine", "nicardipine", "nisoldipine"),
+  anticoagulants = c("heparin", "warfarin")
+)
+
+#inialize list for numeric codes
+cvd_drugs_codes <- vector(mode = "list", length = 6)
+names(cvd_drugs_codes) <- names(cvd_drugs)
+
+#iterate through list converting to numeric codes
+for(i in 1:length(cvd_drugs)){
+  cvd_drugs_codes[[i]] <- prescrip_codes$coding[prescrip_codes$meaning %in% cvd_drugs[[i]]]
+}
+
+#create indicator variables for each disease
+prescrip_data <- cbind(prescrip_data,
+      statins = logical(nrow(prescrip_data)), 
+      diuretics = logical(nrow(prescrip_data)), 
+      beta_blockers = logical(nrow(prescrip_data)),
+      angiotensin_antagonists = logical(nrow(prescrip_data)),
+      calcium_channel_blockers = logical(nrow(prescrip_data)),
+      anticoagulants = logical(nrow(prescrip_data)))
+
+#iterate through diseases and change to true if it contains one of the codes
+for (i in seq_along(cvd_drugs_codes)) {                # i = 1…6
+  prescrip_data[[49 + i]] <-
+    rowSums(                                            # now a matrix
+      sapply(prescrip_data[ , 2:49],                    # every column
+             \(col) col %in% cvd_drugs_codes[[i]]),     # test membership
+      na.rm = TRUE
+    ) > 0
+}
+
+#filter to only relevant prescription data
+prescrip_data <- prescrip_data %>% 
+  select(eid, names(cvd_drugs_codes))
+```
+
+
+## Join prescription data with other variables for analysis
+```{r}
+#merge data frames
+final_data <- imputed_clean %>% 
+  left_join(prescrip_data) %>% 
+  mutate(CVD = if_any(Hypertension:Cerebral.Infarction, ~ . > 0.00001)) %>% 
+  filter(Age >= 60)
+
+
+#save final dataframe for clustering as csv
+write.csv(final_data, "clustering_data_parents_ad.csv", row.names = FALSE)
+data <- read.csv("clustering_data.csv")
+
+data_filt <- data %>% filter(Age >= 60)
+sum(data_filt$CVD)
+write.csv(data_filt, "clustering_data_older.csv", row.names = FALSE)
+
+```

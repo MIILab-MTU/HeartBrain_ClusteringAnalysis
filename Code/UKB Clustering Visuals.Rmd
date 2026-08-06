@@ -1,0 +1,325 @@
+---
+title: "UKB Clustering Visuals"
+author: "Aili Toyli"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#define working directory
+wd = ""
+knitr::opts_knit$set(root.dir = paste0(wd, "UKB_Limited/"))
+```
+
+## Read in data
+```{r}
+results <- read.csv("cluster_results_with_labels.csv")
+```
+
+## Prepare data in R
+```{r}
+library(tidyverse)
+
+#convert binary variables to factors
+results_df <- results %>%
+  mutate(Hypertension = ifelse(Hypertension > 0.5, 1, 0)) %>% 
+  mutate(across(
+    where(~ all(na.omit(.x) %in% c(0, 1, "0", "1", TRUE, FALSE, "TRUE", "FALSE", "True","False"))),
+    ~ factor(
+        case_when(
+          .x %in% c(1, "1", TRUE, "TRUE", "True")  ~ "Yes",
+          .x %in% c(0, "0", FALSE, "FALSE", "False") ~ "No",
+          TRUE ~ NA_character_   # keep NA as NA
+        ),
+        levels = c("No", "Yes")
+      )
+  )) %>% 
+  mutate(Cluster = as.factor(Cluster))
+
+#recode clusters for consistency
+results_df$Cluster <- factor(results_df$Cluster,
+                             levels = c("3", "1", "2", "4"),
+                             labels = c("1", "2", "3", "4"))
+
+
+table(results_df$Cluster)
+```
+
+
+## Create visualization for continuous variables
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Example: replace with your actual dataframe and variable names
+vars_to_plot <- c("DBP", "SBP", "Age", "BMI", "Alcohol", "Income", "Education")
+
+# Convert from wide to long format
+df_long <- results_df %>%
+  pivot_longer(cols = all_of(vars_to_plot),
+               names_to = "Variable",
+               values_to = "Value")
+
+# Create boxplots, faceted in a 2x4 grid
+ggplot(df_long, aes(x = Cluster, y = Value, fill = Cluster)) +
+  geom_boxplot(outlier.shape = 16, outlier.size = 1.5) +
+  facet_wrap(~ Variable, nrow = 2, ncol = 4, scales = "free_y") +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Distribution of Numeric Variables\nAcross Clusters",
+    x = "Cluster",
+    y = "Value"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 11, face = "bold"),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+ggsave("ContClust.png", width = 10, height = 8)
+```
+## Create visualizations for categorical variables
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Specify your grouping (factor) variable
+factor_var <- "Cluster"  # replace with your grouping variable
+
+#save variables with labels for graph
+var_labels <- c(
+  Sex_Male = "Male",
+  Acute.Myocardial.Infarction = "Acute Myocardial\nInfarction",
+  Angina.Pectoris = "Angina Pectoris",
+  Atrial.Fibriliation = "Atrial\nFibrillation",
+  Blockage = "Blockage",
+  Cerebral.Infarction = "Cerebral\nInfarction",
+  Chronic.Ischemic.Heart.Disease = "Chronic Ischemic\nHeart Disease",
+  Chronic.Rheumatic.Heart.Disease = "Chronic Rheumatic\nHeart Disease",
+  Heart.Failure = "Heart Failure",
+  Hypertension = "Hypertension",
+  Hypotension = "Hypotension",
+  Pulmonary.Embolism = "Pulmonary\nEmbolism",
+  Diabetes = "Diabetes",
+  Alzheimers.Disease = "Alzheimer's\nDisease",
+  Father.Alzheimers = "Father\nAlzheimer's",
+  Mother.Alzheimers = "Mother\nAlzheimer's",
+  beta_blockers = "Beta Blockers",
+  calcium_channel_blockers = "Calcium Channel\nBlockers",
+  diuretics = "Diuretics",
+  statins = "Statins",
+  angiotensin_antagonists = "Angiotensin\nAntagonists",
+  anticoagulants = "Anticoagulants",
+  Smoking_Current = "Current Smoker",
+  Smoking_Previous = "Previous Smoker"
+)
+
+variable_order <- names(var_labels)
+# Automatically detect all factor variables except the grouping variable
+factor_vars <- names(results_df)[sapply(results_df, is.factor) & names(results_df) != factor_var]
+
+# Convert from wide to long format
+df_long_factors <- results_df %>%
+  select(all_of(factor_var), all_of(factor_vars)) %>%
+  pivot_longer(cols = all_of(factor_vars),
+               names_to = "Variable",
+               values_to = "Value") %>% 
+  mutate(Variable = factor(Variable, levels = variable_order))
+
+# Convert factor levels like "Yes"/"No" → logical TRUE/FALSE if applicable
+df_long_factors <- df_long_factors %>%
+  mutate(Value = Value %in% c("Yes", "TRUE", "True", "1"))
+
+# Compute proportion of "Yes" (TRUE) for each Cluster × Variable
+df_prop <- df_long_factors %>%
+  group_by(!!sym(factor_var), Variable) %>%
+  summarise(Proportion = mean(Value, na.rm = TRUE), .groups = "drop")
+
+# Create barplots showing proportion of "Yes" for each variable by Cluster
+plot <- ggplot(df_prop, aes(x = !!sym(factor_var), y = Proportion, fill = !!sym(factor_var))) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Variable, nrow = 4, ncol = 6,
+             labeller = labeller(Variable = var_labels)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Proportion of Condition\nAcross Clusters",
+    x = "Cluster",
+    y = "Proportion of 'Yes'"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 11, face = "bold"),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 20)
+  )
+
+plot
+ggsave("CategoricalClust.png", width = 12, height = 10)
+```
+
+## Add analysis with imaging variables
+```{r}
+# Read in datafile
+allVars <- read.csv(paste0(wd, "Parents_AD/cluster_results_allVars.csv"))
+
+# Perform preprocessing
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+allVars_df <- allVars %>%
+  mutate(Hypertension = ifelse(Hypertension > 0.5, 1, 0)) %>% 
+  mutate(across(
+    where(~ all(na.omit(.x) %in% c(0, 1, "0", "1", TRUE, FALSE, "TRUE", "FALSE", "True", "False"))),
+    ~ factor(
+      case_when(
+        .x %in% c(1, "1", TRUE, "TRUE", "True")  ~ "Yes",
+        .x %in% c(0, "0", FALSE, "FALSE", "False") ~ "No",
+        TRUE ~ NA_character_
+      ),
+      levels = c("No", "Yes")
+    )
+  )) %>% 
+  mutate(Cluster = as.factor(Cluster))
+
+table(allVars$Cluster)
+
+# Automatically detect all numeric variables
+vars_to_plot <- names(allVars_df)[sapply(allVars_df, is.numeric)]
+
+#save variables with labels for graph
+var_labels <- c(
+  Age = "Age",
+  Education = "Eduction\n(Years)",
+  Income = "Annual Household\nIncome (£)",
+  Physical.Activity = "Physical Activity\n(Days/Week)",
+  Alcohol = "Alcohol\n(Drinks/Year)",
+  SBP = "SBP",
+  DBP = "DBP",
+  BMI = "BMI",
+  HDL = "HDL",
+  LDL = "LDL",
+  brainPC1 = "Brain PC 1",
+  brainPC2 = "Brain PC 2",
+  brainPC3 = "Brain PC 3",
+  brainPC4 = "Brain PC 4",
+  cognitivePC1 = "Cognitive PC 1",
+  heartPC1 = "Heart PC 1",
+  heartPC2 = "Heart PC 2",
+  heartPC3 = "Heart PC 3"
+)
+variable_order <- names(var_labels)
+
+# Convert from wide to long format
+df_long <- allVars_df %>%
+  pivot_longer(
+    cols = all_of(vars_to_plot),
+    names_to = "Variable",
+    values_to = "Value"
+  ) %>% 
+  mutate(Variable = factor(Variable, levels = variable_order))
+
+# Create boxplots for all numeric variables
+ggplot(df_long, aes(x = Cluster, y = Value, fill = Cluster)) +
+  geom_boxplot(outlier.shape = 16, outlier.size = 1.5) +
+  facet_wrap(~ Variable, nrow = 6, ncol = 3, scales = "free_y",
+             labeller = labeller(Variable = var_labels)) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Distribution of Numeric Variables\nAcross Clusters",
+    x = "Cluster",
+    y = "Value"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 11, face = "bold"),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+ggsave("ContClusterAllVars.png", height = 10, width = 8)
+```
+
+## Create visualizations for categorical variables when using all variables
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Specify your grouping (factor) variable
+factor_var <- "Cluster"  # replace with your grouping variable
+
+#save variables with labels for graph
+var_labels <- c(
+  Sex_Male = "Male",
+  Acute.Myocardial.Infarction = "Acute Myocardial\nInfarction",
+  Angina.Pectoris = "Angina Pectoris",
+  Atrial.Fibriliation = "Atrial\nFibrillation",
+  Blockage = "Blockage",
+  Cerebral.Infarction = "Cerebral\nInfarction",
+  Chronic.Ischemic.Heart.Disease = "Chronic Ischemic\nHeart Disease",
+  Chronic.Rheumatic.Heart.Disease = "Chronic Rheumatic\nHeart Disease",
+  Heart.Failure = "Heart Failure",
+  Hypertension = "Hypertension",
+  Hypotension = "Hypotension",
+  Pulmonary.Embolism = "Pulmonary\nEmbolism",
+  Diabetes = "Diabetes",
+  Depression.Bipolar_Yes = "Depression/\nBipolar",
+  Alzheimers.Disease = "Alzheimer's\nDisease",
+  Father.Alzheimers = "Father\nAlzheimer's",
+  Mother.Alzheimers = "Mother\nAlzheimer's",
+  beta_blockers = "Beta Blockers",
+  calcium_channel_blockers = "Calcium Channel\nBlockers",
+  diuretics = "Diuretics",
+  statins = "Statins",
+  angiotensin_antagonists = "Angiotensin\nAntagonists",
+  anticoagulants = "Anticoagulants",
+  Smoking_Current = "Current Smoker",
+  Smoking_Previous = "Previous Smoker"
+)
+
+variable_order <- names(var_labels)
+# Automatically detect all factor variables except the grouping variable
+factor_vars <- names(allVars_df)[sapply(allVars_df, is.factor) & names(allVars_df) != factor_var]
+
+# Convert from wide to long format
+df_long_factors <- allVars_df %>%
+  select(all_of(factor_var), all_of(factor_vars)) %>%
+  pivot_longer(cols = all_of(factor_vars),
+               names_to = "Variable",
+               values_to = "Value") %>% 
+  mutate(Variable = factor(Variable, levels = variable_order))
+
+# Convert factor levels like "Yes"/"No" → logical TRUE/FALSE if applicable
+df_long_factors <- df_long_factors %>%
+  mutate(Value = Value %in% c("Yes", "TRUE", "True", "1"))
+
+# Compute proportion of "Yes" (TRUE) for each Cluster × Variable
+df_prop <- df_long_factors %>%
+  group_by(!!sym(factor_var), Variable) %>%
+  summarise(Proportion = mean(Value, na.rm = TRUE), .groups = "drop")
+
+# Create barplots showing proportion of "Yes" for each variable by Cluster
+plot <- ggplot(df_prop, aes(x = !!sym(factor_var), y = Proportion, fill = !!sym(factor_var))) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Variable, nrow = 5, ncol = 5,
+             labeller = labeller(Variable = var_labels)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Proportion of Condition\nAcross Clusters",
+    x = "Cluster",
+    y = "Proportion of 'Yes'"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 11, face = "bold"),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+plot
+ggsave("CategoricalClustAllVars.png", width = 10, height = 10)
+```

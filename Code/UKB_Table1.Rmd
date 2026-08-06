@@ -1,0 +1,111 @@
+---
+title: "UKB_Table1"
+author: "Aili Toyli"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load in data
+```{r cars}
+library(tidyverse)
+wd = ""
+data <- read.csv(paste0(wd, 'pre_table1.csv'))
+df <- data %>% select(-eid) %>% 
+  select(-matches("PC", ignore.case = TRUE)) %>% 
+  select(-matches("Ethnicity", ignore.case = TRUE)) %>% 
+  select(-c(Mean.time.to.correctly.identify.matches,
+            Maximum.digits.remembered.correctly,
+            Fluid.intelligence.score,
+            Duration.to.complete.alphanumeric.path..trail..2.,
+            Number.of.puzzles.correctly.solved)) %>% 
+  mutate(Sex_Male = as.logical(Sex_Male),
+         Smoking_Current = as.logical(Smoking_Current),
+         Smoking_Previous = as.logical(Smoking_Previous),
+         Depression.Bipolar_Yes = as.logical(Depression.Bipolar_Yes))
+
+# Identify numeric columns
+num_cols <- df %>% select(where(is.numeric)) %>% colnames()
+
+# Compute medians and MADs
+meds <- df %>% summarise(across(all_of(num_cols), ~ median(.x, na.rm = TRUE)))
+mads <- df %>% summarise(across(all_of(num_cols), ~ mad(.x, na.rm = TRUE)))
+
+# Create MAD-distance columns, filter, then drop the helper columns
+df_filtered <- df %>%
+  mutate(across(
+    all_of(num_cols),
+    ~ abs(.x - meds[[cur_column()]]) / mads[[cur_column()]],
+    .names = "mad_dist_{col}"
+  )) %>%
+  filter(if_all(starts_with("mad_dist_"), ~ is.na(.x) | .x <= 5)) %>%
+  select(-starts_with("mad_dist_"))
+```
+
+## Create table 1
+```{r pressure, echo=FALSE}
+library(tidyverse)
+
+summarize_dataframe <- function(df) {
+  results <- list()
+  
+  for (colname in names(df)) {
+    column <- df[[colname]]
+    
+    if (is.numeric(column)) {
+      # Mean and SD
+      col_mean <- mean(column, na.rm = TRUE)
+      col_sd <- sd(column, na.rm = TRUE)
+      summary_text <- sprintf("%.2f (%.2f)", col_mean, col_sd)
+      
+      total <- length(column)
+      na_count <- sum(is.na(column))
+      na_percent <- (na_count / total) * 100
+      na_text <- sprintf("%d (%.1f%%)", na_count, na_percent)
+      
+      results[[paste0(colname, "_summary")]] <- data.frame(
+        Variable = colname,
+        Level = "Mean (SD)",
+        Summary = summary_text,
+        stringsAsFactors = FALSE
+      )
+      
+      results[[paste0(colname, "_na")]] <- data.frame(
+        Variable = colname,
+        Level = "NA",
+        Summary = na_text,
+        stringsAsFactors = FALSE
+      )
+      
+    } else if (is.factor(column) || is.character(column) || is.logical(column)) {
+      counts <- table(column, useNA = "ifany")
+      percents <- prop.table(counts) * 100
+      
+      cat_df <- data.frame(
+        Variable = colname,
+        Level = names(counts),
+        Summary = sprintf("%d (%.1f%%)", as.integer(counts), round(percents, 1)),
+        stringsAsFactors = FALSE
+      )
+      
+      results[[colname]] <- cat_df
+    }
+  }
+  
+  # Combine to a single data frame
+  summary_df <- do.call(rbind, results)
+  rownames(summary_df) <- NULL
+  
+  return(summary_df)
+}
+
+# Generate summary of variables
+covars <- summarize_dataframe(df_filtered)
+View(covars)
+
+#save data as csv
+write.csv(covars, paste0(wd, 'table1.csv'))
+```
